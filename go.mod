@@ -1,4 +1,4 @@
-module github.com/Icinga/terraform-provider-icinga2
+module github.com/jouir/terraform-provider-icinga2
 
 go 1.25.3
 

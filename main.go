@@ -11,8 +11,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-mux/tf5to6server"
 	"github.com/hashicorp/terraform-plugin-mux/tf6muxserver"
 
-	"github.com/Icinga/terraform-provider-icinga2/icinga2"
-	"github.com/Icinga/terraform-provider-icinga2/internal/provider"
+	"github.com/jouir/terraform-provider-icinga2/icinga2"
+	"github.com/jouir/terraform-provider-icinga2/internal/provider"
 )
 
 var (

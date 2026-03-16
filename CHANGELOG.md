@@ -1,4 +1,10 @@
-## 0.6.0 (December 11, 2026)
+## 0.7.0 (March 16, 2026)
+
+ENHANCEMENTS:
+* Add icinga2_downtime resource
+* Add zone attribute to icinga2_host resource
+
+## 0.6.0 (December 11, 2025)
 
 ENHANCEMENTS:
 * Automatically run acceptance and unit tests in GHA

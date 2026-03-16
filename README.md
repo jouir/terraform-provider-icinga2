@@ -1,8 +1,9 @@
 Icinga2 Terraform Provider
 ==================
 
-[![Build Status](https://github.com/Icinga/terraform-provider-icinga2/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/Icinga/terraform-provider-icinga2/actions/workflows/unit-tests.yml/badge.svg)
-[![Build Status](https://github.com/Icinga/terraform-provider-icinga2/actions/workflows/acceptance-tests.yml/badge.svg)](https://github.com/Icinga/terraform-provider-icinga2/actions/workflows/acceptance-tests.yml/badge.svg)
+[![Build Status](https://github.com/jouir/terraform-provider-icinga2/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/jouir/terraform-provider-icinga2/actions/workflows/unit-tests.yml/badge.svg)
+[![Build Status](https://github.com/jouir/terraform-provider-icinga2/actions/workflows/acceptance-tests.yml/badge.svg)](https://github.com/jouir/terraform-provider-icinga2/actions/workflows/acceptance-tests.yml/badge.svg)
+
 
 Requirements
 ------------
@@ -14,7 +15,7 @@ Building The Provider
 ---------------------
 
 ```sh
-$ git clone git@github.com:Icinga/terraform-provider-icinga2
+$ git clone git@github.com:jouir/terraform-provider-icinga2
 $ cd terraform-provider-icinga2
 $ make build
 ```

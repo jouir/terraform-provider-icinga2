@@ -31,4 +31,4 @@ website/vendor
 !command/test-fixtures/**/.terraform/
 
 dist/
-
+terraform-provider-icinga2

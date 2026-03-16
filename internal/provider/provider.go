@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-
 	"github.com/lrsmith/go-icinga2-api/iapi"
 )
 
@@ -126,6 +125,10 @@ func (p *icinga2Provider) Configure(ctx context.Context, req provider.ConfigureR
 		api_password = config.Password.ValueString()
 	}
 
+	if !config.Insecure_skip_tls_verify.IsNull() {
+		tlsVerify = config.Insecure_skip_tls_verify.ValueBool()
+	}
+
 	if api_url == "" {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("api_url"),
@@ -187,5 +190,6 @@ func (p *icinga2Provider) DataSources(_ context.Context) []func() datasource.Dat
 func (p *icinga2Provider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		HostGroup,
+		Downtime,
 	}
 }

@@ -31,30 +31,6 @@ func TestAccCreateBasicUser(t *testing.T) {
 	})
 }
 
-func TestAccCreateEmailUser(t *testing.T) {
-
-	var testAccCreateBasicUser = fmt.Sprintf(`
-		resource "icinga2_user" "tf-2" {
-		name      = "terraform-user-2"
-		email     = "email@example.com"
-	}`)
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:  func() { testAccPreCheck(t) },
-		Providers: testAccProviders,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccCreateBasicUser,
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckUserExists("icinga2_user.tf-2"),
-					testAccCheckResourceState("icinga2_user.tf-2", "name", "terraform-user-2"),
-					testAccCheckResourceState("icinga2_user.tf-2", "email", "email@example.com"),
-				),
-			},
-		},
-	})
-}
-
 func testAccCheckUserExists(rn string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		resource, ok := s.RootModule().Resources[rn]

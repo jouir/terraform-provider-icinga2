@@ -23,6 +23,7 @@ description: |-
 - `groups` (List of String)
 - `templates` (List of String)
 - `vars` (Map of String)
+- `zone` (String)
 
 ### Read-Only
 
