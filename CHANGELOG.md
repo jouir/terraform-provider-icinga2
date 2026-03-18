@@ -1,3 +1,8 @@
+## 0.7.1 (March 18, 2026)
+
+BUG FIXES:
+* Retry to create host when deadline exceeded
+
 ## 0.7.0 (March 16, 2026)
 
 ENHANCEMENTS:

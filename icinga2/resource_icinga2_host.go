@@ -1,9 +1,13 @@
 package icinga2
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/lrsmith/go-icinga2-api/iapi"
 )
@@ -13,7 +17,11 @@ func resourceIcinga2Host() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceIcinga2HostCreate,
 		Read:   resourceIcinga2HostRead,
+		Exists: resourceIcinga2HostExists,
 		Delete: resourceIcinga2HostDelete,
+		Importer: &schema.ResourceImporter{
+			State: resourceIcinga2HostImport,
+		},
 		Schema: map[string]*schema.Schema{
 			"hostname": {
 				Type:        schema.TypeString,
@@ -88,25 +96,78 @@ func resourceIcinga2HostCreate(d *schema.ResourceData, meta interface{}) error {
 		templates[i] = v.(string)
 	}
 
-	// Call CreateHost with normalized data
-	hosts, err := CreateHost(client, hostname, address, checkCommand, vars, templates, groups, zone)
+	// Host must not exist before
+	exists, err := resourceIcinga2HostExists(d, meta)
 	if err != nil {
 		return err
 	}
+	if exists {
+		return fmt.Errorf("Host '%s' already exists", hostname)
+	}
 
-	found := false
+	// Create host with retries when context deadline exceeded
+	return retry.Retry(d.Timeout(schema.TimeoutCreate)-time.Minute, func() *retry.RetryError {
+		exists, err := resourceIcinga2HostExists(d, meta)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return retry.RetryableError(fmt.Errorf("Timeout when checking if host '%s' exists", hostname))
+			}
+			retry.NonRetryableError(fmt.Errorf("Failed to check if host '%s' exists: %v", hostname, err))
+		}
+
+		if !exists {
+			hosts, err := CreateHost(client, hostname, address, checkCommand, vars, templates, groups, zone)
+
+			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					return retry.RetryableError(fmt.Errorf("Timeout when creating host '%s'", hostname))
+				}
+				return retry.NonRetryableError(fmt.Errorf("Failed to create host '%s': %v", hostname, err))
+			}
+
+			found := false
+			for _, host := range hosts {
+				if host.Name == hostname {
+					d.SetId(hostname)
+					found = true
+				}
+			}
+
+			if !found {
+				return retry.NonRetryableError(fmt.Errorf("Host '%s' created but not found in the response: %s", hostname, err))
+			}
+
+			return nil
+		}
+
+		err = resourceIcinga2HostRead(d, meta)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return retry.RetryableError(fmt.Errorf("Timeout when reading host '%s'", hostname))
+			}
+			return retry.NonRetryableError(fmt.Errorf("Failed to read host '%s': %v", hostname, err))
+		}
+
+		return nil
+	})
+}
+
+func resourceIcinga2HostExists(d *schema.ResourceData, meta interface{}) (bool, error) {
+	client := meta.(*iapi.Server)
+	hostname := d.Get("hostname").(string)
+
+	hosts, err := client.GetHost(hostname)
+	if err != nil {
+		return false, err
+	}
+
 	for _, host := range hosts {
 		if host.Name == hostname {
-			d.SetId(hostname)
-			found = true
+			return true, nil
 		}
 	}
 
-	if !found {
-		return fmt.Errorf("Failed to Create Host %s : %s", hostname, err)
-	}
-
-	return nil
+	return false, nil
 }
 
 func resourceIcinga2HostRead(d *schema.ResourceData, meta interface{}) error {
@@ -152,6 +213,13 @@ func resourceIcinga2HostDelete(d *schema.ResourceData, meta interface{}) error {
 
 	return nil
 
+}
+
+func resourceIcinga2HostImport(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+	d.Set("hostname", d.Id())
+	err := resourceIcinga2HostRead(d, meta)
+
+	return []*schema.ResourceData{d}, err
 }
 
 // Patch for zone
