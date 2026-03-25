@@ -249,13 +249,8 @@ type HostgroupStruct struct {
 
 // HostgroupAttrs ...
 type HostgroupAttrs struct {
-	ActionURL   string   `json:"action_url,omitempty"`
-	DisplayName string   `json:"display_name,omitempty"`
-	Groups      []string `json:"groups,omitempty"`
-	Notes       string   `json:"notes,omitempty"`
-	NotesURL    string   `json:"notes_url,omitempty"`
-	Templates   []string `json:"templates,omitempty"`
-	Zone        string   `json:"zone,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	Zone        string `json:"zone,omitempty"`
 }
 
 // From https://raw.githubusercontent.com/lrsmith/go-icinga2-api/refs/heads/master/iapi/hostgroups.go
