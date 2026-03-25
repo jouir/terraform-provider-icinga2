@@ -31,6 +31,10 @@ resource "icinga2_hostgroup" "my-hostgroup" {
 - `display_name` (String) Display name of HostGroup
 - `name` (String) Name of the HostGroup
 
+### Optional
+
+- `zone` (String) Name of the zone
+
 ### Read-Only
 
 - `id` (String) The ID of this resource.
