@@ -15,6 +15,7 @@ func TestAccCreateBasicHostGroup(t *testing.T) {
 		hostgroupName     = "terraform-hostgroup-1"
 		firstDisplayName  = "Terraform Test HostGroup"
 		secondDisplayName = "Some New HostGroup DisplayName"
+		zone              = "master"
 	)
 
 	resource.Test(t, resource.TestCase{
@@ -51,6 +52,27 @@ func TestAccCreateBasicHostGroup(t *testing.T) {
 					),
 				},
 			},
+			// HostGroup with zone
+			{
+				Config: testAccCreateHostGroupWithZone(hostgroupName, secondDisplayName, zone),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"icinga2_hostgroup.tf-hg-2",
+						tfjsonpath.New("name"),
+						knownvalue.StringExact(hostgroupName),
+					),
+					statecheck.ExpectKnownValue(
+						"icinga2_hostgroup.tf-hg-2",
+						tfjsonpath.New("display_name"),
+						knownvalue.StringExact(secondDisplayName),
+					),
+					statecheck.ExpectKnownValue(
+						"icinga2_hostgroup.tf-hg-2",
+						tfjsonpath.New("zone"),
+						knownvalue.StringExact(zone),
+					),
+				},
+			},
 		},
 	})
 }
@@ -62,4 +84,14 @@ resource "icinga2_hostgroup" "tf-hg-1" {
 	display_name = "%s"
 }
 `, name, displayName)
+}
+
+func testAccCreateHostGroupWithZone(name, displayName, zone string) string {
+	return fmt.Sprintf(`
+resource "icinga2_hostgroup" "tf-hg-2" {
+	name = "%s"
+	display_name = "%s"
+	zone = "%s"
+}
+`, name, displayName, zone)
 }

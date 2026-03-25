@@ -1,3 +1,11 @@
+## 0.8.0 (March 25, 2026)
+
+BUG FIXES:
+* Do not raise an error if the icinga2_hostgroup is not found on the infrastructure when deleted
+
+ENHANCEMENTS:
+* Add zone support to icinga2_hostgroup
+
 ## 0.7.1 (March 18, 2026)
 
 BUG FIXES:
