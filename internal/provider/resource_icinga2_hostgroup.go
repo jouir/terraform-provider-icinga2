@@ -107,6 +107,23 @@ func (r *hostGroupResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
+	hostgroup, err := GetHostgroup(r.client, plan.Name.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error creating Host Group",
+			"Could not verify host group existance: "+err.Error(),
+		)
+		return
+	}
+
+	if hostgroup != nil {
+		resp.Diagnostics.AddError(
+			"Error creating Host Group",
+			"The host group already exists",
+		)
+		return
+	}
+
 	hostgroups, err := CreateHostgroup(r.client, plan.Name.ValueString(), plan.DisplayName.ValueString(), plan.Zone.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -227,6 +244,14 @@ func (r *hostGroupResource) Delete(ctx context.Context, req resource.DeleteReque
 
 	err := DeleteHostgroup(r.client, state.Name.ValueString())
 	if err != nil {
+		if err.Error() == "No objects found." {
+			resp.Diagnostics.AddError(
+				"Error Deleting Host Group",
+				"The host group has already been deleted or the API user does not have permission to delete the host group.",
+			)
+			return
+		}
+
 		resp.Diagnostics.AddError(
 			"Error Deleting Host Group",
 			"Could not delete host group, unexpected error: "+err.Error(),
@@ -359,9 +384,6 @@ func DeleteHostgroup(server *iapi.Server, name string) error {
 	endpoint := fmt.Sprintf("%v/%v", hostgroupEndpoint, name)
 	results, err := server.NewAPIRequest(http.MethodDelete, endpoint, nil)
 	if err != nil {
-		if err.Error() == "No objects found." {
-			return nil
-		}
 		return err
 	}
 
