@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -18,8 +19,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &hostGroupResource{}
-	_ resource.ResourceWithConfigure = &hostGroupResource{}
+	_ resource.Resource                = &hostGroupResource{}
+	_ resource.ResourceWithConfigure   = &hostGroupResource{}
+	_ resource.ResourceWithImportState = &hostGroupResource{}
 )
 
 func HostGroup() resource.Resource {
@@ -149,6 +151,10 @@ func (r *hostGroupResource) Create(ctx context.Context, req resource.CreateReque
 	if resp.Diagnostics.HasError() {
 		return
 	}
+}
+
+func (r *hostGroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
 }
 
 func (r *hostGroupResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
