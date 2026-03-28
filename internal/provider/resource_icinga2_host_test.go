@@ -126,13 +126,13 @@ func TestAccCreateTemplateHost(t *testing.T) {
 
 func TestAccCreateZoneHost(t *testing.T) {
 
-	var testAccCreateZoneHost = fmt.Sprintf(`
+	var testAccCreateZoneHost = `
 		resource "icinga2_host" "tf-5" {
 		hostname = "terraform-host-5"
 		address = "10.10.10.5"
 		check_command = "hostalive"
 		zone = "master"
-		}`)
+		}`
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },

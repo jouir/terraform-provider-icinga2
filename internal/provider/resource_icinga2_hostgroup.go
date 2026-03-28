@@ -113,7 +113,7 @@ func (r *hostGroupResource) Create(ctx context.Context, req resource.CreateReque
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error creating Host Group",
-			"Could not verify host group existance: "+err.Error(),
+			"Could not verify host group existence: "+err.Error(),
 		)
 		return
 	}
@@ -271,7 +271,7 @@ func (r *hostGroupResource) Delete(ctx context.Context, req resource.DeleteReque
 
 // From https://raw.githubusercontent.com/lrsmith/go-icinga2-api/refs/heads/master/iapi/structs.go
 
-// HostgroupStruct is a struct used to store results from an Icinga2 HostGroup API Call. The content is also used to generate the JSON payload for the CreateHostgroup call
+// HostgroupStruct is a struct used to store results from an Icinga2 HostGroup API Call. The content is also used to generate the JSON payload for the CreateHostgroup call.
 type HostgroupStruct struct {
 	Name  string         `json:"name"`
 	Type  string         `json:"type"`

@@ -54,7 +54,7 @@ func TestAccCreateBasicHostGroup(t *testing.T) {
 			},
 			// HostGroup with zone
 			{
-				Config: testAccCreateHostGroupWithZone(hostgroupName, secondDisplayName, zone),
+				Config: providerConfig + testAccCreateHostGroupWithZone(hostgroupName, secondDisplayName, zone),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
 						"icinga2_hostgroup.tf-hg-2",

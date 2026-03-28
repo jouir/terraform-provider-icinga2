@@ -371,7 +371,7 @@ func DeleteDowntime(client *iapi.Server, downtime string, author string) error {
 
 	for _, result := range results {
 		if int(result.Code) != http.StatusOK {
-			return fmt.Errorf("Failed to delete downtime: %s", result.Status)
+			return fmt.Errorf("failed to delete downtime: %s", result.Status)
 		}
 	}
 	return nil

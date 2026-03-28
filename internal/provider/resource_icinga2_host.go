@@ -286,11 +286,10 @@ func CreateHost(server *iapi.Server, hostname, address, checkCommand string, var
 	attrs["address"] = address
 	attrs["check_command"] = checkCommand
 
-	if variables != nil {
-		for key, value := range variables {
-			attrs["vars."+key] = value
-		}
+	for key, value := range variables {
+		attrs["vars."+key] = value
 	}
+
 	if groups != nil {
 		attrs["groups"] = groups
 	}
@@ -309,7 +308,7 @@ func CreateHost(server *iapi.Server, hostname, address, checkCommand string, var
 	}
 
 	// Make the API request to create the hosts.
-	results, err := server.NewAPIRequest("PUT", "/objects/hosts/"+hostname, []byte(payloadJSON))
+	results, err := server.NewAPIRequest("PUT", "/objects/hosts/"+hostname, payloadJSON)
 	if err != nil {
 		return nil, err
 	}
