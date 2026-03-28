@@ -1,9 +1,7 @@
 Icinga2 Terraform Provider
 ==================
 
-[![Build Status](https://github.com/jouir/terraform-provider-icinga2/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/jouir/terraform-provider-icinga2/actions/workflows/unit-tests.yml/badge.svg)
-[![Build Status](https://github.com/jouir/terraform-provider-icinga2/actions/workflows/acceptance-tests.yml/badge.svg)](https://github.com/jouir/terraform-provider-icinga2/actions/workflows/acceptance-tests.yml/badge.svg)
-
+[![Build Status](https://github.com/jouir/terraform-provider-icinga2/actions/workflows/qa.yml/badge.svg)](https://github.com/jouir/terraform-provider-icinga2/actions/workflows/qa.yml/badge.svg)
 
 Requirements
 ------------
