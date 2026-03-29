@@ -3,11 +3,15 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -16,8 +20,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &hostResource{}
-	_ resource.ResourceWithConfigure = &hostResource{}
+	_ resource.Resource                = &hostResource{}
+	_ resource.ResourceWithConfigure   = &hostResource{}
+	_ resource.ResourceWithImportState = &hostResource{}
 )
 
 func Host() resource.Resource {
@@ -38,6 +43,11 @@ type hostResourceModel struct {
 
 type hostResource struct {
 	client *iapi.Server
+}
+
+type retryableHostsResponse struct {
+	hosts []HostStruct
+	err   error
 }
 
 func (r *hostResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -75,6 +85,9 @@ func (r *hostResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 			"groups": schema.ListAttribute{
 				ElementType: types.StringType,
 				Optional:    true,
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.RequiresReplace(),
+				},
 			},
 			"vars": schema.MapAttribute{
 				ElementType: types.StringType,
@@ -123,6 +136,24 @@ func (r *hostResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
+	// Host must not exist
+	exists, err := HostExists(r.client, plan.Hostname.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error creating Host",
+			"Could not check if host '"+plan.Hostname.ValueString()+"' exists: "+err.Error(),
+		)
+		return
+	}
+
+	if exists {
+		resp.Diagnostics.AddError(
+			"Error creating Host",
+			"Host '"+plan.Hostname.ValueString()+"' already exists",
+		)
+		return
+	}
+
 	var groups []string
 	if !plan.Groups.IsNull() && !plan.Groups.IsUnknown() {
 		for _, group := range plan.Groups.Elements() {
@@ -131,7 +162,7 @@ func (r *hostResource) Create(ctx context.Context, req resource.CreateRequest, r
 			} else {
 				resp.Diagnostics.AddError(
 					"Error creating Host",
-					"Group not a string",
+					"Group is not a string",
 				)
 			}
 		}
@@ -145,7 +176,7 @@ func (r *hostResource) Create(ctx context.Context, req resource.CreateRequest, r
 			} else {
 				resp.Diagnostics.AddError(
 					"Error creating Host",
-					"Variable not a string",
+					"Variable is not a string",
 				)
 			}
 		}
@@ -159,22 +190,66 @@ func (r *hostResource) Create(ctx context.Context, req resource.CreateRequest, r
 			} else {
 				resp.Diagnostics.AddError(
 					"Error creating Host",
-					"Template not a string",
+					"Template is not a string",
 				)
 			}
 		}
 	}
 
-	hosts, err := CreateHost(r.client, plan.Hostname.ValueString(), plan.Address.ValueString(), plan.CheckCommand.ValueString(), vars, templates, groups, plan.Zone.ValueString())
+	// Retryable function to create a host
+	// If the error is retryable, return the error
+	// If not, add the error to the retryable response
+	// Retry on context.DeadlineExceeded
+	createOperation := func() (*retryableHostsResponse, error) {
+		response := &retryableHostsResponse{}
+
+		exists, err := HostExists(r.client, plan.Hostname.ValueString())
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			response.err = err
+			return response, nil //nolint:nilerr
+		}
+
+		var hosts []HostStruct
+		if !exists {
+			hosts, err = CreateHost(r.client, plan.Hostname.ValueString(), plan.Address.ValueString(), plan.CheckCommand.ValueString(), vars, templates, groups, plan.Zone.ValueString())
+		} else {
+			hosts, err = GetHost(r.client, plan.Hostname.ValueString())
+		}
+
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			response.err = err
+			return response, nil //nolint:nilerr
+		}
+
+		response.hosts = hosts
+		return response, nil
+	}
+
+	createResponse, err := backoff.RetryWithData(createOperation, backoff.NewExponentialBackOff())
+
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error creating Host",
-			"Could not create host unexpected error: "+err.Error(),
+			"Could not create host '"+plan.Hostname.ValueString()+"' after retrying: "+err.Error(),
 		)
 		return
 	}
 
-	for _, host := range hosts {
+	if createResponse.err != nil {
+		resp.Diagnostics.AddError(
+			"Error creating Host",
+			"Could not create host '"+plan.Hostname.ValueString()+"': "+createResponse.err.Error(),
+		)
+		return
+	}
+
+	for _, host := range createResponse.hosts {
 		if host.Name == plan.Hostname.ValueString() {
 			plan.ID = types.StringValue(host.Name)
 		}
@@ -200,7 +275,7 @@ func (r *hostResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error Reading Host",
-			"Could not read host "+state.Hostname.ValueString()+": "+err.Error(),
+			"Could not read host '"+state.Hostname.ValueString()+"': "+err.Error(),
 		)
 		return
 	}
@@ -239,14 +314,93 @@ func (r *hostResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 		return
 	}
 
-	err := r.client.DeleteHost(state.Hostname.ValueString())
+	// Host must exist
+	exists, err := HostExists(r.client, state.Hostname.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Error Deleting Host",
-			"Could not delete host, unexpected error: "+err.Error(),
+			"Error deleting Host",
+			"Could not check if host '"+state.Hostname.ValueString()+"' exists: "+err.Error(),
 		)
 		return
 	}
+
+	if !exists {
+		resp.Diagnostics.AddError(
+			"Error deleting Host",
+			"Host '"+state.Hostname.ValueString()+"' does not exist",
+		)
+		return
+	}
+
+	// Retryable function to delete a host
+	// If the error is retryable, return the error
+	// If not, add the error to the retryable response
+	// Retry on context.DeadlineExceeded
+	deleteOperation := func() (*retryableHostsResponse, error) {
+		response := &retryableHostsResponse{}
+
+		exists, err := HostExists(r.client, state.Hostname.ValueString())
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			response.err = err
+			return response, nil //nolint:nilerr
+		}
+
+		if exists {
+			err = r.client.DeleteHost(state.Hostname.ValueString())
+			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					return nil, err
+				}
+				response.err = err
+				return response, nil //nolint:nilerr
+			}
+		}
+
+		return response, nil
+	}
+
+	deleteResponse, err := backoff.RetryWithData(deleteOperation, backoff.NewExponentialBackOff())
+
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error deleting Host",
+			"Could not delete host '"+state.Hostname.ValueString()+"' after retrying: "+err.Error(),
+		)
+		return
+	}
+
+	if deleteResponse.err != nil {
+		resp.Diagnostics.AddError(
+			"Error deleting Host",
+			"Could not delete host '"+state.Hostname.ValueString()+"': "+deleteResponse.err.Error(),
+		)
+		return
+	}
+}
+
+func (r *hostResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Host must exist
+	exists, err := HostExists(r.client, req.ID)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error importing Host",
+			"Could not check if host '"+req.ID+"' exists: "+err.Error(),
+		)
+		return
+	}
+
+	if !exists {
+		resp.Diagnostics.AddError(
+			"Error importing Host",
+			"Host '"+req.ID+"' does not exist",
+		)
+		return
+	}
+
+	resource.ImportStatePassthroughID(ctx, path.Root("hostname"), req, resp)
 }
 
 // Host patch
@@ -343,4 +497,19 @@ func GetHost(server *iapi.Server, hostname string) ([]HostStruct, error) {
 	}
 
 	return hosts, err
+}
+
+func HostExists(server *iapi.Server, hostname string) (bool, error) {
+	hosts, err := GetHost(server, hostname)
+	if err != nil {
+		return false, err
+	}
+
+	for _, host := range hosts {
+		if host.Name == hostname {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

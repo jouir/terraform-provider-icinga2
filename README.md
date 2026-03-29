@@ -1,6 +1,12 @@
 Icinga2 Terraform Provider
 ==================
 
+> [!WARNING]
+> This repository is a fork of [Icinga/terraform-provider-icinga2](https://github.com/Icinga/terraform-provider-icinga2).
+> We are trying to keep this fork in sync with upstream as much as we can.
+> Use at your own risk.
+> See the [changelog](CHANGELOG.fork.md) of the fork.
+
 [![Build Status](https://github.com/jouir/terraform-provider-icinga2/actions/workflows/qa.yml/badge.svg)](https://github.com/jouir/terraform-provider-icinga2/actions/workflows/qa.yml/badge.svg)
 
 Requirements

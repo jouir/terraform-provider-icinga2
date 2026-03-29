@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -39,6 +40,11 @@ type hostGroupResourceModel struct {
 // hostResource defines the resource implementation.
 type hostGroupResource struct {
 	client *iapi.Server
+}
+
+type retryableHostgroupsResponse struct {
+	hostgroups []HostgroupStruct
+	err        error
 }
 
 func (r *hostGroupResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -109,33 +115,78 @@ func (r *hostGroupResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
-	hostgroup, err := GetHostgroup(r.client, plan.Name.ValueString())
+	// Host group must not exist
+	exists, err := HostgroupExists(r.client, plan.Name.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error creating Host Group",
-			"Could not verify host group existence: "+err.Error(),
+			"Could not verify if host group '"+plan.Name.ValueString()+"' exists: "+err.Error(),
 		)
 		return
 	}
 
-	if hostgroup != nil {
+	if exists {
 		resp.Diagnostics.AddError(
 			"Error creating Host Group",
-			"The host group already exists",
+			"Host group '"+plan.Name.ValueString()+"' already exists",
 		)
 		return
 	}
 
-	hostgroups, err := CreateHostgroup(r.client, plan.Name.ValueString(), plan.DisplayName.ValueString(), plan.Zone.ValueString())
+	// Retryable function to create a hostgroup
+	// If the error is retryable, return the error
+	// If not, add the error to the retryable response
+	// Retry on context.DeadlineExceeded
+	createOperation := func() (*retryableHostgroupsResponse, error) {
+		response := &retryableHostgroupsResponse{}
+
+		exists, err := HostgroupExists(r.client, plan.Name.ValueString())
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			response.err = err
+			return response, nil //nolint:nilerr
+		}
+
+		var hostgroups []HostgroupStruct
+		if !exists {
+			hostgroups, err = CreateHostgroup(r.client, plan.Name.ValueString(), plan.DisplayName.ValueString(), plan.Zone.ValueString())
+		} else {
+			hostgroups, err = GetHostgroup(r.client, plan.Name.ValueString())
+		}
+
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			response.err = err
+			return response, nil //nolint:nilerr
+		}
+
+		response.hostgroups = hostgroups
+		return response, nil
+	}
+
+	createResponse, err := backoff.RetryWithData(createOperation, backoff.NewExponentialBackOff())
+
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error creating Host Group",
-			"Could not create host group unexpected error: "+err.Error(),
+			"Could not create host group '"+plan.Name.ValueString()+"' after retrying: "+err.Error(),
 		)
 		return
 	}
 
-	for _, hostgroup := range hostgroups {
+	if createResponse.err != nil {
+		resp.Diagnostics.AddError(
+			"Error creating Host Group",
+			"Could not create host group '"+plan.Name.ValueString()+"': "+err.Error(),
+		)
+		return
+	}
+
+	for _, hostgroup := range createResponse.hostgroups {
 		if hostgroup.Name == plan.Name.ValueString() {
 			plan.ID = types.StringValue(hostgroup.Name)
 			plan.Name = types.StringValue(hostgroup.Name)
@@ -153,10 +204,6 @@ func (r *hostGroupResource) Create(ctx context.Context, req resource.CreateReque
 	}
 }
 
-func (r *hostGroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
-}
-
 func (r *hostGroupResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state hostGroupResourceModel
 	diags := req.State.Get(ctx, &state)
@@ -169,7 +216,7 @@ func (r *hostGroupResource) Read(ctx context.Context, req resource.ReadRequest, 
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error Reading Host Group",
-			"Could not read host group "+state.Name.ValueString()+": "+err.Error(),
+			"Could not read host group '"+state.Name.ValueString()+"': "+err.Error(),
 		)
 		return
 	}
@@ -206,13 +253,11 @@ func (r *hostGroupResource) Update(ctx context.Context, req resource.UpdateReque
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error Updating Host Group",
-			"Could not update host group, unexpected error: "+err.Error(),
+			"Could not update host group '"+plan.Name.ValueString()+"': "+err.Error(),
 		)
 		return
 	}
 
-	// Fetch updated items from GetOrder as UpdateOrder items are not
-	// populated.
 	hostgroups, err := GetHostgroup(r.client, plan.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -248,22 +293,75 @@ func (r *hostGroupResource) Delete(ctx context.Context, req resource.DeleteReque
 		return
 	}
 
-	err := DeleteHostgroup(r.client, state.Name.ValueString())
-	if err != nil {
-		if err.Error() == "No objects found." {
-			resp.Diagnostics.AddError(
-				"Error Deleting Host Group",
-				"The host group has already been deleted or the API user does not have permission to delete the host group.",
-			)
-			return
+	// Retryable function to delete a hostgroup
+	// If the error is retryable, return the error
+	// If not, add the error to the retryable response
+	// Retry on context.DeadlineExceeded
+	deleteOperation := func() (*retryableHostgroupsResponse, error) {
+		response := &retryableHostgroupsResponse{}
+
+		exists, err := HostgroupExists(r.client, state.Name.ValueString())
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			response.err = err
+			return response, nil //nolint:nilerr
 		}
 
+		if exists {
+			err = r.client.DeleteHostgroup(state.Name.ValueString())
+			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					return nil, err
+				}
+				response.err = err
+				return response, nil //nolint:nilerr
+			}
+		}
+
+		return response, nil
+	}
+
+	deleteResponse, err := backoff.RetryWithData(deleteOperation, backoff.NewExponentialBackOff())
+
+	if err != nil {
 		resp.Diagnostics.AddError(
-			"Error Deleting Host Group",
-			"Could not delete host group, unexpected error: "+err.Error(),
+			"Error deleting Host Group",
+			"Could not delete host group '"+state.Name.ValueString()+"' after retrying: "+err.Error(),
 		)
 		return
 	}
+
+	if deleteResponse.err != nil {
+		resp.Diagnostics.AddError(
+			"Error deleting Host Group",
+			"Could not delete host group '"+state.Name.ValueString()+"': "+deleteResponse.err.Error(),
+		)
+		return
+	}
+}
+
+func (r *hostGroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Host group must exist
+	exists, err := HostgroupExists(r.client, req.ID)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error importing Host Group",
+			"Could not verify if host group '"+req.ID+"' exists: "+err.Error(),
+		)
+		return
+	}
+
+	if !exists {
+		resp.Diagnostics.AddError(
+			"Error importing Host Group",
+			"Host group '"+req.ID+"' does not exist",
+		)
+		return
+	}
+
+	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
 }
 
 // HostGroup patch
@@ -398,4 +496,19 @@ func DeleteHostgroup(server *iapi.Server, name string) error {
 	}
 
 	return fmt.Errorf("%s", results.ErrorString)
+}
+
+func HostgroupExists(server *iapi.Server, name string) (bool, error) {
+	hostgroups, err := GetHostgroup(server, name)
+	if err != nil {
+		return false, err
+	}
+
+	for _, hostgroup := range hostgroups {
+		if hostgroup.Name == name {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
