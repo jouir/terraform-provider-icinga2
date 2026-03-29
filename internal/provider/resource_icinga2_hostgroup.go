@@ -365,9 +365,7 @@ func (r *hostGroupResource) ImportState(ctx context.Context, req resource.Import
 }
 
 // HostGroup patch
-// ---------------
-
-// From https://raw.githubusercontent.com/lrsmith/go-icinga2-api/refs/heads/master/iapi/structs.go
+// https://github.com/lrsmith/go-icinga2-api/pull/22
 
 // HostgroupStruct is a struct used to store results from an Icinga2 HostGroup API Call. The content is also used to generate the JSON payload for the CreateHostgroup call.
 type HostgroupStruct struct {

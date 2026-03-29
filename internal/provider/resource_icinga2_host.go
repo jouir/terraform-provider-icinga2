@@ -499,6 +499,7 @@ func GetHost(server *iapi.Server, hostname string) ([]HostStruct, error) {
 	return hosts, err
 }
 
+// https://github.com/lrsmith/go-icinga2-api/pull/21
 func HostExists(server *iapi.Server, hostname string) (bool, error) {
 	hosts, err := GetHost(server, hostname)
 	if err != nil {
