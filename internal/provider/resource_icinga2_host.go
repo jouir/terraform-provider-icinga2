@@ -45,11 +45,6 @@ type hostResource struct {
 	client *iapi.Server
 }
 
-type retryableHostsResponse struct {
-	hosts []HostStruct
-	err   error
-}
-
 func (r *hostResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_host"
 }
@@ -196,60 +191,34 @@ func (r *hostResource) Create(ctx context.Context, req resource.CreateRequest, r
 		}
 	}
 
-	// Retryable function to create a host
-	// If the error is retryable, return the error
-	// If not, add the error to the retryable response
-	// Retry on context.DeadlineExceeded
-	createOperation := func() (*retryableHostsResponse, error) {
-		response := &retryableHostsResponse{}
+	hosts, err := CreateHost(r.client, plan.Hostname.ValueString(), plan.Address.ValueString(), plan.CheckCommand.ValueString(), vars, templates, groups, plan.Zone.ValueString())
 
-		exists, err := HostExists(r.client, plan.Hostname.ValueString())
-		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
+	// Retry on context deadline exceeded
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+		checkOperation := func() ([]HostStruct, error) {
+			hosts, err := GetHost(r.client, plan.Hostname.ValueString())
+			if err != nil {
 				return nil, err
 			}
-			response.err = err
-			return response, nil //nolint:nilerr
-		}
-
-		var hosts []HostStruct
-		if !exists {
-			hosts, err = CreateHost(r.client, plan.Hostname.ValueString(), plan.Address.ValueString(), plan.CheckCommand.ValueString(), vars, templates, groups, plan.Zone.ValueString())
-		} else {
-			hosts, err = GetHost(r.client, plan.Hostname.ValueString())
-		}
-
-		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
-				return nil, err
+			for _, host := range hosts {
+				if host.Name == plan.Hostname.ValueString() {
+					return hosts, nil
+				}
 			}
-			response.err = err
-			return response, nil //nolint:nilerr
+			return nil, fmt.Errorf("Host '%s' not found after creation", plan.Hostname.ValueString())
 		}
-
-		response.hosts = hosts
-		return response, nil
+		hosts, err = backoff.RetryWithData(checkOperation, backoff.NewExponentialBackOff())
 	}
-
-	createResponse, err := backoff.RetryWithData(createOperation, backoff.NewExponentialBackOff())
 
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error creating Host",
-			"Could not create host '"+plan.Hostname.ValueString()+"' after retrying: "+err.Error(),
+			"Could not create host '"+plan.Hostname.ValueString()+"': "+err.Error(),
 		)
 		return
 	}
 
-	if createResponse.err != nil {
-		resp.Diagnostics.AddError(
-			"Error creating Host",
-			"Could not create host '"+plan.Hostname.ValueString()+"': "+createResponse.err.Error(),
-		)
-		return
-	}
-
-	for _, host := range createResponse.hosts {
+	for _, host := range hosts {
 		if host.Name == plan.Hostname.ValueString() {
 			plan.ID = types.StringValue(host.Name)
 		}
@@ -314,70 +283,34 @@ func (r *hostResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 		return
 	}
 
-	// Host must exist
-	exists, err := HostExists(r.client, state.Hostname.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error deleting Host",
-			"Could not check if host '"+state.Hostname.ValueString()+"' exists: "+err.Error(),
-		)
-		return
-	}
+	err := r.client.DeleteHost(state.Hostname.ValueString())
 
-	if !exists {
-		resp.Diagnostics.AddError(
-			"Error deleting Host",
-			"Host '"+state.Hostname.ValueString()+"' does not exist",
-		)
-		return
-	}
-
-	// Retryable function to delete a host
-	// If the error is retryable, return the error
-	// If not, add the error to the retryable response
-	// Retry on context.DeadlineExceeded
-	deleteOperation := func() (*retryableHostsResponse, error) {
-		response := &retryableHostsResponse{}
-
-		exists, err := HostExists(r.client, state.Hostname.ValueString())
-		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
-				return nil, err
-			}
-			response.err = err
-			return response, nil //nolint:nilerr
-		}
-
-		if exists {
-			err = r.client.DeleteHost(state.Hostname.ValueString())
+	// Retry on context deadline exceeded
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+		checkOperation := func() error {
+			exists, err := HostExists(r.client, state.Hostname.ValueString())
 			if err != nil {
-				if errors.Is(err, context.DeadlineExceeded) {
-					return nil, err
-				}
-				response.err = err
-				return response, nil //nolint:nilerr
+				return err
 			}
+			if exists {
+				return fmt.Errorf("Host still exists after deletion")
+			}
+			return nil
 		}
-
-		return response, nil
+		err = backoff.Retry(checkOperation, backoff.NewExponentialBackOff())
 	}
-
-	deleteResponse, err := backoff.RetryWithData(deleteOperation, backoff.NewExponentialBackOff())
 
 	if err != nil {
+		var errMsg string
+		if err.Error() == "No objects found." {
+			errMsg = "Host '" + state.Hostname.ValueString() + "' does not exist or insufficient permissions to delete the host"
+		} else {
+			errMsg = "Could not delete host '" + state.Hostname.ValueString() + "': " + err.Error()
+		}
 		resp.Diagnostics.AddError(
 			"Error deleting Host",
-			"Could not delete host '"+state.Hostname.ValueString()+"' after retrying: "+err.Error(),
+			errMsg,
 		)
-		return
-	}
-
-	if deleteResponse.err != nil {
-		resp.Diagnostics.AddError(
-			"Error deleting Host",
-			"Could not delete host '"+state.Hostname.ValueString()+"': "+deleteResponse.err.Error(),
-		)
-		return
 	}
 }
 
