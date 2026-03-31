@@ -281,20 +281,11 @@ func (r *hostResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		Address:      plan.Address.ValueString(),
 		CheckCommand: plan.CheckCommand.ValueString(),
 	}
-	_, err := UpdateHost(r.client, plan.ID.ValueString(), attrs)
+	hosts, err := UpdateHost(r.client, plan.ID.ValueString(), attrs)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error Updating Host",
 			"Could not update host '"+plan.Hostname.ValueString()+"': "+err.Error(),
-		)
-		return
-	}
-
-	hosts, err := GetHost(r.client, plan.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error Reading Host",
-			"Could not read host "+plan.Hostname.ValueString()+": "+err.Error(),
 		)
 		return
 	}

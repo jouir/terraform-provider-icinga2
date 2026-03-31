@@ -218,20 +218,11 @@ func (r *hostGroupResource) Update(ctx context.Context, req resource.UpdateReque
 	attrs := HostgroupAttrs{
 		DisplayName: plan.DisplayName.ValueString(),
 	}
-	_, err := UpdateHostgroup(r.client, plan.ID.ValueString(), attrs)
+	hostgroups, err := UpdateHostgroup(r.client, plan.ID.ValueString(), attrs)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error Updating Host Group",
 			"Could not update host group '"+plan.Name.ValueString()+"': "+err.Error(),
-		)
-		return
-	}
-
-	hostgroups, err := GetHostgroup(r.client, plan.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error Reading Host Group",
-			"Could not read host group "+plan.Name.ValueString()+": "+err.Error(),
 		)
 		return
 	}
