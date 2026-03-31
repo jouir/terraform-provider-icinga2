@@ -51,6 +51,9 @@ func (r *hostGroupResource) Schema(ctx context.Context, req resource.SchemaReque
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"last_updated": schema.StringAttribute{
 				Computed: true,
@@ -65,9 +68,6 @@ func (r *hostGroupResource) Schema(ctx context.Context, req resource.SchemaReque
 			"display_name": schema.StringAttribute{
 				Required:    true,
 				Description: "Display name of HostGroup",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"zone": schema.StringAttribute{
 				Optional:    true,
@@ -209,16 +209,16 @@ func (r *hostGroupResource) Read(ctx context.Context, req resource.ReadRequest, 
 
 func (r *hostGroupResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan hostGroupResourceModel
-	diags := req.State.Get(ctx, &plan)
+	diags := req.Plan.Get(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	params := &HostgroupParams{
+	attrs := HostgroupAttrs{
 		DisplayName: plan.DisplayName.ValueString(),
 	}
-	_, err := UpdateHostgroup(r.client, plan.ID.ValueString(), params)
+	_, err := UpdateHostgroup(r.client, plan.ID.ValueString(), attrs)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error Updating Host Group",
@@ -336,11 +336,6 @@ type HostgroupAttrs struct {
 
 const hostgroupEndpoint = "/objects/hostgroups"
 
-// HostgroupParams defines all available options related to updating a HostGroup.
-type HostgroupParams struct {
-	DisplayName string
-}
-
 // GetHostgroup fetches a HostGroup by its name.
 func GetHostgroup(server *iapi.Server, name string) ([]HostgroupStruct, error) {
 	endpoint := fmt.Sprintf("%v/%v", hostgroupEndpoint, name)
@@ -403,34 +398,51 @@ func CreateHostgroup(server *iapi.Server, name, displayName, zone string) ([]Hos
 	return nil, fmt.Errorf("%s", results.ErrorString)
 }
 
-// UpdateHostgroup updates a HostGroup with its params.
-func UpdateHostgroup(server *iapi.Server, name string, params *HostgroupParams) ([]HostgroupStruct, error) {
-	attrs := make(map[string]interface{})
-	if params.DisplayName != "" {
-		attrs["display_name"] = params.DisplayName
-	}
+type HostgroupUpdateResponse struct {
+	Code   float64 `json:"code"`
+	Name   string  `json:"name"`
+	Status string  `json:"status"`
+}
 
-	attrsMap := map[string]interface{}{
-		"attrs": attrs,
-	}
+// UpdateHostgroup updates a HostGroup with its attrs.
+func UpdateHostgroup(server *iapi.Server, name string, attrs HostgroupAttrs) ([]HostgroupStruct, error) {
 
-	attrsBody, err := json.Marshal(attrsMap)
+	var hostgroup HostgroupStruct
+	hostgroup.Attrs = attrs
+
+	body, err := json.Marshal(hostgroup)
 	if err != nil {
 		return nil, err
 	}
 
 	endpoint := fmt.Sprintf("%v/%v", hostgroupEndpoint, name)
-	results, err := server.NewAPIRequest(http.MethodPost, endpoint, attrsBody)
+	r, err := server.NewAPIRequest(http.MethodPost, endpoint, body)
 	if err != nil {
 		return nil, err
 	}
 
-	if results.Code == http.StatusOK {
-		hostgroups, err := GetHostgroup(server, name)
-		return hostgroups, err
+	if r.Code != http.StatusOK {
+		return nil, fmt.Errorf("expected %d, got %d", http.StatusOK, r.Code)
 	}
 
-	return nil, fmt.Errorf("%s", results.ErrorString)
+	jsonResponse, err := json.Marshal(r.Results)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal the host group response: %v", err)
+	}
+
+	var results []HostgroupUpdateResponse
+	err = json.Unmarshal(jsonResponse, &results)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshall the host group response: %v", err)
+	}
+
+	for _, result := range results {
+		if result.Code != http.StatusOK {
+			return nil, fmt.Errorf("%s", result.Status)
+		}
+	}
+
+	return GetHostgroup(server, name)
 }
 
 // DeleteHostgroup deletes a HostGroup by its name.

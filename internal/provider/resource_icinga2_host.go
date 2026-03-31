@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -54,6 +55,9 @@ func (r *hostResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"last_updated": schema.StringAttribute{
 				Computed: true,
@@ -67,15 +71,9 @@ func (r *hostResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 			},
 			"address": schema.StringAttribute{
 				Required: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"check_command": schema.StringAttribute{
 				Required: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"groups": schema.ListAttribute{
 				ElementType: types.StringType,
@@ -91,6 +89,9 @@ func (r *hostResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 			"templates": schema.ListAttribute{
 				ElementType: types.StringType,
 				Optional:    true,
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.RequiresReplace(),
+				},
 			},
 			"zone": schema.StringAttribute{
 				Optional: true,
@@ -269,10 +270,52 @@ func (r *hostResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 }
 
 func (r *hostResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	resp.Diagnostics.AddError(
-		"Update not supported",
-		"Updates are currently not supported for host resources",
-	)
+	var plan hostResourceModel
+	diags := req.Plan.Get(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	attrs := HostAttrs{
+		Address:      plan.Address.ValueString(),
+		CheckCommand: plan.CheckCommand.ValueString(),
+	}
+	_, err := UpdateHost(r.client, plan.ID.ValueString(), attrs)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error Updating Host",
+			"Could not update host '"+plan.Hostname.ValueString()+"': "+err.Error(),
+		)
+		return
+	}
+
+	hosts, err := GetHost(r.client, plan.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error Reading Host",
+			"Could not read host "+plan.Hostname.ValueString()+": "+err.Error(),
+		)
+		return
+	}
+
+	for _, host := range hosts {
+		if host.Name == plan.Hostname.ValueString() {
+			plan.ID = types.StringValue(host.Name)
+			plan.Hostname = types.StringValue(host.Name)
+			plan.Address = types.StringValue(host.Attrs.Address)
+			plan.CheckCommand = types.StringValue(host.Attrs.CheckCommand)
+			plan.Zone = types.StringValue(host.Attrs.Zone)
+		}
+	}
+	plan.LastUpdated = types.StringValue(time.Now().Format(time.RFC850))
+
+	// Set refreshed plan
+	diags = resp.State.Set(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 }
 
 func (r *hostResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -360,11 +403,11 @@ type HostAttrs struct {
 	Address6     string      `json:"address6"`
 	CheckCommand string      `json:"check_command"`
 	DisplayName  string      `json:"display_name"`
-	Groups       []string    `json:"groups"`
+	Groups       []string    `json:"groups,omitempty"`
 	Notes        string      `json:"notes"`
 	NotesURL     string      `json:"notes_url"`
 	Vars         interface{} `json:"vars,omitempty"`
-	Templates    []string    `json:"templates"`
+	Templates    []string    `json:"templates,omitempty"`
 	Zone         string      `json:"zone,omitempty"`
 }
 
@@ -446,4 +489,50 @@ func HostExists(server *iapi.Server, hostname string) (bool, error) {
 	}
 
 	return false, nil
+}
+
+type HostUpdateResponse struct {
+	Code   float64 `json:"code"`
+	Name   string  `json:"name"`
+	Status string  `json:"status"`
+}
+
+// UpdateHost updates a Host with its attrs.
+func UpdateHost(server *iapi.Server, name string, attrs HostAttrs) ([]HostStruct, error) {
+
+	var host HostStruct
+	host.Attrs = attrs
+
+	body, err := json.Marshal(host)
+	if err != nil {
+		return nil, err
+	}
+
+	r, err := server.NewAPIRequest(http.MethodPost, "/objects/hosts/"+name, body)
+	if err != nil {
+		return nil, err
+	}
+
+	if r.Code != http.StatusOK {
+		return nil, fmt.Errorf("expected %d, got %d", http.StatusOK, r.Code)
+	}
+
+	jsonResponse, err := json.Marshal(r.Results)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal the host response: %v", err)
+	}
+
+	var results []HostUpdateResponse
+	err = json.Unmarshal(jsonResponse, &results)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshall the host response: %v", err)
+	}
+
+	for _, result := range results {
+		if result.Code != http.StatusOK {
+			return nil, fmt.Errorf("%s", result.Status)
+		}
+	}
+
+	return GetHost(server, name)
 }
