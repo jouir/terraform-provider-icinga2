@@ -1,3 +1,12 @@
+## 0.10.0 (April 1, 2026)
+
+ENHANCEMENTS:
+* Update hosts and hostgroups
+* Sync with upstream
+
+BUG FIXES:
+* Simplify retry logic and detect insufficient deletion permissions
+
 ## 0.9.0 (March 29, 2026)
 
 ENHANCEMENTS:
